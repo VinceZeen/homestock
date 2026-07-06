@@ -148,7 +148,7 @@ const firebaseConfig = {
 //    Get a free key at https://aistudio.google.com  (see setup note)
 //    Leave as "" to hide the photo feature.
 // ================================================================
-const GEMINI_API_KEY = "AQ.Ab8RN6Le9uereTviLy45uRTx7ylgIBsdKsfl6kU677kIa5dGKQ";  // <-- paste your Gemini API key between the quotes, then save
+const GEMINI_API_KEY = "AQ.Ab8RN6JC3D84Aa3vnwHQrcxb5pIs2w_1JrpYc9ZOqwMyG72mjA";
 // ================================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -366,18 +366,26 @@ async function countFromPhoto(file, name, unit){
   const b64 = await shrinkImage(file);
   const prompt = `You are doing a household stock take. Count how many "${name}" are visible in this photo, in units of "${unit}". Count individual sellable units (e.g. each roll, bottle, pack or box). Partially visible units count as one. If a multipack's label states its contents (e.g. "10 rolls") and the pack is unopened, use the stated number. Respond ONLY with minified JSON, no markdown: {"count": <integer>, "note": "<max 12 words: what you counted or any uncertainty>"}`;
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    { method:"POST", headers:{ "Content-Type":"application/json" },
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`,
+    { method:"POST", headers:{ "Content-Type":"application/json", "X-goog-api-key": GEMINI_API_KEY },
       body: JSON.stringify({ contents:[{ parts:[
         { inline_data:{ mime_type:"image/jpeg", data:b64 } },
         { text: prompt }
       ]}]}) });
-  if(!res.ok) throw new Error("API " + res.status);
-  const data = await res.json();
+  const raw = await res.text();
+  if(!res.ok){
+    let msg = `HTTP ${res.status}`;
+    try { msg = JSON.parse(raw).error?.message || msg; } catch(e){}
+    throw new Error(msg);
+  }
+  const data = JSON.parse(raw);
   const txt = (data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+  if(!txt) throw new Error("Empty response (image may have been blocked)");
   const clean = txt.replace(/```json|```/g,"").trim();
-  const out = JSON.parse(clean);
-  if(typeof out.count !== "number" || out.count < 0) throw new Error("bad count");
+  let out;
+  try { out = JSON.parse(clean); }
+  catch(e){ throw new Error("Unexpected reply: " + clean.slice(0,60)); }
+  if(typeof out.count !== "number" || out.count < 0) throw new Error("No count in reply");
   return out;
 }
 
@@ -560,7 +568,7 @@ function openModal(item){
         toast(`Counted ${r.count} ${un}${r.note ? " — " + r.note : ""}`);
       } catch(e){
         console.error(e);
-        toast("Couldn't count from that photo — try clearer lighting/angle");
+        toast("Photo count failed: " + (e.message || "unknown error"));
       } finally {
         photoBtn.disabled = false; photoBtn.textContent = "📷 Count from photo";
         fileIn.value = "";
