@@ -68,6 +68,17 @@
   .qty.ok b{color:var(--ok)} .qty.low b{color:var(--low)} .qty.out b{color:var(--out)}
 
   .restock{background:var(--ok-bg);color:var(--ok);font-size:12px;font-weight:700;border-radius:10px;padding:9px 12px}
+  .advice{background:#EEF3F3;color:var(--accent);font-size:12px;font-weight:700;border-radius:10px;padding:9px 10px;white-space:nowrap}
+  .verdict{font-size:15px;font-weight:800;border-radius:12px;padding:12px 16px;margin-bottom:12px}
+  .verdict.ok{background:var(--ok-bg);color:var(--ok)} .verdict.low{background:var(--low-bg);color:var(--low)} .verdict.out{background:var(--out-bg);color:var(--out)}
+  .why{font-size:13px;line-height:1.55;color:var(--ink);margin-bottom:18px}
+  .shoplinks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .shoplinks a{background:#FFF;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+               text-decoration:none;color:var(--ink);display:flex;flex-direction:column;gap:2px}
+  .shoplinks a span{font-weight:700;font-size:13px}
+  .shoplinks a small{color:var(--sub);font-size:11px}
+  .del{font-size:15px;padding:8px 2px 8px 4px;opacity:.45}
+  .del:active{opacity:1}
   input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent)}
 
   .empty{text-align:center;padding:36px 32px 0;color:var(--sub);font-size:14px}
@@ -212,6 +223,7 @@ function connect(){
   });
   render();
 }
+const pendingAdds = new Set();
 async function saveItem(data, id){
   const payload = {
     name:data.name.trim(), category:data.category, unit:data.unit,
@@ -222,12 +234,26 @@ async function saveItem(data, id){
   if(id){
     const prev = items.find(i=>i.id===id) || {};
     payload.fullQty = Math.max(prev.fullQty||1, payload.qty);
+    // block renaming into an existing item's name
+    const clash = items.find(i=> i.id!==id && i.name.trim().toLowerCase()===payload.name.toLowerCase());
+    if(clash){ toast(`"${payload.name}" already exists`); return; }
     await updateDoc(doc(itemsCol(), id), payload);
   } else {
-    payload.fullQty = Math.max(1, payload.qty);
-    payload.bought = false;
-    payload.createdAt = serverTimestamp();
-    await setDoc(doc(itemsCol()), payload);
+    const key = payload.name.toLowerCase();
+    // block duplicates: same name already in the list, or an add already in flight
+    const dup = items.find(i=> i.name.trim().toLowerCase()===key);
+    if(dup){ toast(`"${payload.name}" is already in your list`); return false; }
+    if(pendingAdds.has(key)) return false;
+    pendingAdds.add(key);
+    try {
+      payload.fullQty = Math.max(1, payload.qty);
+      payload.bought = false;
+      payload.createdAt = serverTimestamp();
+      await setDoc(doc(itemsCol()), payload);
+      return true;
+    } finally {
+      pendingAdds.delete(key);
+    }
   }
 }
 async function changeQty(id, delta){
@@ -247,6 +273,95 @@ async function restock(id){
 }
 async function toggleBought(id, v){ await updateDoc(doc(itemsCol(), id), { bought:v }); }
 async function removeItem(id){ await deleteDoc(doc(itemsCol(), id)); }
+
+// ---------- purchase advisor ----------
+const ZH_DICT = [
+  [/kitchen (towel|roll)|paper towel/i, "厨房纸巾"],
+  [/toilet (paper|roll)/i, "卷纸 家用装"],
+  [/tissue/i, "抽纸"],
+  [/dish ?soap|dishwashing/i, "洗洁精"],
+  [/laundry (detergent|liquid|powder)|washing (liquid|powder)/i, "洗衣液"],
+  [/fabric softener/i, "衣物柔顺剂"],
+  [/trash bag|garbage bag|rubbish bag/i, "垃圾袋 加厚"],
+  [/hand (soap|wash)/i, "洗手液"],
+  [/shampoo/i, "洗发水"],
+  [/body wash|shower gel/i, "沐浴露"],
+  [/toothpaste/i, "牙膏"],
+  [/toothbrush/i, "牙刷"],
+  [/sponge/i, "洗碗海绵"],
+  [/batter(y|ies)/i, "电池 5号 7号"],
+  [/light ?bulb/i, "LED灯泡"],
+  [/wet wipes|wipes/i, "湿巾"],
+  [/diaper/i, "纸尿裤"],
+  [/floor cleaner/i, "地板清洁剂"],
+  [/bleach/i, "漂白水"],
+  [/air ?freshener/i, "空气清新剂"],
+  [/insect|mosquito/i, "驱蚊 灭虫"],
+  [/aluminium foil|aluminum foil/i, "铝箔纸"],
+  [/cling (wrap|film)|plastic wrap/i, "保鲜膜"],
+  [/ziplock|zip lock/i, "密封袋"],
+];
+const zhQuery = (name)=> (ZH_DICT.find(([re])=>re.test(name))||[null,name])[1];
+
+function advise(item){
+  const name = item.name.toLowerCase();
+  const isLiquid = /soap|detergent|shampoo|wash|gel|liquid|bleach|softener|cleaner|sanitis|sanitiz|spray|oil|sauce/.test(name);
+  const isBulkPaper = /towel|tissue|paper|roll|wipes|diaper/.test(name);
+  const out = item.qty <= 0;
+  const veryLow = !out && item.qty <= Math.max(1, Math.ceil(item.threshold/2));
+
+  let verdict, why, cls;
+  if(out){
+    verdict = "Buy locally — today";
+    cls = "out";
+    why = `You're completely out, so China shipping (7–21 days) is too slow. Grab it at the supermarket today, or Shopee/Lazada SG delivers in 1–3 days if you can stretch that long. Restock the bulk pack from Taobao/PDD afterwards so you're never caught out again.`;
+  } else if(isLiquid){
+    verdict = "Buy locally / Shopee SG";
+    cls = "low";
+    why = `Liquids are heavy and usually restricted to sea freight from China (2–4 weeks), and the shipping cost eats the savings. Local brands at FairPrice or bundle deals on Shopee SG are almost always the better buy for this.`;
+  } else if(isBulkPaper && !veryLow){
+    verdict = "Taobao / PDD — order now";
+    cls = "ok";
+    why = `Paper and disposable goods are where Taobao and Pinduoduo save the most — bulk packs often cost 30–50% less than local. You still have buffer stock, which covers the 7–14 day direct shipping comfortably. PDD is usually cheapest; Taobao has more brand choice — tap both below and compare the per-piece price including shipping.`;
+  } else if(veryLow){
+    verdict = "Shopee SG (1–3 days)";
+    cls = "low";
+    why = `You're very low — the 7–14 day China lead time is cutting it fine. Shopee/Lazada SG gets it to you in 1–3 days at decent prices. If you want the Taobao/PDD bulk price anyway, buy one local pack to bridge the gap and order the bulk pack in parallel.`;
+  } else {
+    verdict = "Compare Taobao / PDD first";
+    cls = "ok";
+    why = `You have enough buffer to wait out the 7–14 day direct shipping, so it's worth checking the China price first. Rule of thumb: if the Taobao/PDD price including shipping isn't at least ~25% cheaper than Shopee SG, just buy local and get it faster.`;
+  }
+
+  const en = encodeURIComponent(item.name);
+  const zh = encodeURIComponent(zhQuery(item.name));
+  return { verdict, why, cls, links: [
+    { label:"Taobao 淘宝", sub:"7–14 days", url:`https://s.taobao.com/search?q=${zh}` },
+    { label:"Pinduoduo 拼多多", sub:"10–20 days", url:`https://mobile.yangkeduo.com/search_result.html?search_key=${zh}` },
+    { label:"Shopee SG", sub:"1–3 days", url:`https://shopee.sg/search?keyword=${en}` },
+    { label:"FairPrice", sub:"today / next day", url:`https://www.fairprice.com.sg/search?query=${en}` },
+  ]};
+}
+
+function openAdvice(item){
+  const a = advise(item);
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  ov.innerHTML = `<div class="sheet">
+    <div class="top"><h2>Where to buy: ${esc(item.name)}</h2><button class="x">×</button></div>
+    <div class="verdict ${a.cls}">${a.verdict}</div>
+    <p class="why">${a.why}</p>
+    <label>Check live prices</label>
+    <div class="shoplinks">
+      ${a.links.map(l=>`<a href="${l.url}" target="_blank" rel="noopener">
+        <span>${l.label}</span><small>${l.sub}</small></a>`).join("")}
+    </div>
+    <div class="note" style="margin-top:14px">Lead times are typical for delivery to Singapore. Searches on Taobao/PDD open with the Chinese product name pre-filled.</div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.onclick = (e)=>{ if(e.target===ov) ov.remove(); };
+  ov.querySelector(".x").onclick = ()=>ov.remove();
+}
 
 // ---------- render ----------
 function render(){
@@ -319,6 +434,7 @@ function cardHTML(i){
       <div class="qty ${st}"><b>${i.qty}</b><span>${esc(i.unit)}</span></div>
       <button data-inc="${i.id}">+</button>
     </div>
+    <button class="del" data-del="${i.id}" aria-label="Delete ${esc(i.name)}">🗑</button>
   </div>`;
 }
 function shopHTML(i){
@@ -329,6 +445,7 @@ function shopHTML(i){
       <div class="name ${i.bought?"done":""}">${esc(i.name)}</div>
       <div class="meta"><span class="badge ${st}">${stLabel[st]} · ${i.qty} ${esc(i.unit)} left</span></div>
     </div>
+    <button class="advice" data-advice="${i.id}">💡 Where?</button>
     <button class="restock" data-restock="${i.id}">Restocked</button>
   </div>`;
 }
@@ -342,6 +459,13 @@ function bind(){
   document.querySelectorAll("[data-dec]").forEach(b=> b.onclick=()=>changeQty(b.dataset.dec, -1));
   document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=>openModal(items.find(i=>i.id===b.dataset.edit)));
   document.querySelectorAll("[data-restock]").forEach(b=> b.onclick=()=>restock(b.dataset.restock));
+  document.querySelectorAll("[data-advice]").forEach(b=> b.onclick=()=>{
+    const it = items.find(i=>i.id===b.dataset.advice); if(it) openAdvice(it);
+  });
+  document.querySelectorAll("[data-del]").forEach(b=> b.onclick=async ()=>{
+    const it = items.find(i=>i.id===b.dataset.del); if(!it) return;
+    if(confirm(`Delete "${it.name}" from your stock?`)){ await removeItem(it.id); toast(`${it.name} deleted`); }
+  });
   document.querySelectorAll("[data-buy]").forEach(b=> b.onchange=()=>toggleBought(b.dataset.buy, b.checked));
   document.querySelectorAll("[data-quick]").forEach(b=> b.onclick=()=>saveItem(QUICK[Number(b.dataset.quick)]));
   const s = $("#searchIn");
@@ -384,8 +508,8 @@ function openModal(item){
     f.unit = ov.querySelector("#fUnit").value;
     f.threshold = ov.querySelector("#fThr").value;
     close();
-    await saveItem(f, editing?item.id:null);
-    if(!editing) toast(`${f.name.trim()} added`);
+    const created = await saveItem(f, editing?item.id:null);
+    if(!editing && created) toast(`${f.name.trim()} added`);
   };
   const del = ov.querySelector("#fDel");
   if(del) del.onclick = async ()=>{ if(confirm(`Delete ${item.name}?`)){ close(); await removeItem(item.id); } };
