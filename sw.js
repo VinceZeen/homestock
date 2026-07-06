@@ -1,6 +1,6 @@
 // Minimal service worker: caches the app shell so it opens offline.
 // Firestore's own offline cache handles the data.
-const CACHE = "homestock-v7";
+const CACHE = "homestock-v9";
 const ASSETS = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
