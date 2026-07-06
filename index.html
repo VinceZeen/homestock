@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HomeStock</title>
+<meta name="theme-color" content="#0E5E63">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{
+    --bg:#F7F6F1; --card:#FFFFFF; --ink:#1C1E1C; --sub:#6B6F6B; --line:#E4E2D9;
+    --ok:#1E7A46; --ok-bg:#E7F3EC; --low:#B36A00; --low-bg:#FBF0DC;
+    --out:#C0392B; --out-bg:#FAE6E2; --accent:#0E5E63;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       max-width:480px;margin:0 auto;min-height:100vh;padding-bottom:110px}
+  button{font-family:inherit;border:none;cursor:pointer;background:none}
+  input,select{font-family:inherit;font-size:14px}
+
+  header{padding:24px 20px 12px}
+  .brand{color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+  .headrow{display:flex;justify-content:space-between;align-items:flex-end}
+  h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+  .count{text-align:right}
+  .count b{font-family:var(--mono);font-size:24px;display:block;line-height:1}
+  .count span{color:var(--sub);font-size:11px}
+  .house{color:var(--sub);font-size:11px;margin-top:6px}
+  .house button{color:var(--accent);font-weight:600;font-size:11px;text-decoration:underline}
+
+  .tabs{display:flex;background:#ECEAE1;border-radius:12px;padding:4px;margin:0 20px}
+  .tabs button{flex:1;padding:9px 0;border-radius:9px;font-size:13px;font-weight:600;color:var(--sub)}
+  .tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+  .search{margin:16px 20px 0}
+  .search input{width:100%;background:#FFF;border:1px solid var(--line);border-radius:12px;padding:11px 16px;outline:none}
+  .search input:focus{border-color:var(--accent)}
+
+  .chips{display:flex;gap:8px;overflow-x:auto;padding:12px 20px 4px;scrollbar-width:none}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex-shrink:0;background:#FFF;border:1px solid var(--line);color:var(--sub);
+        border-radius:999px;padding:7px 14px;font-size:12px;font-weight:600;white-space:nowrap}
+  .chip.on{background:var(--ink);color:#FFF;border-color:var(--ink)}
+
+  .list{display:flex;flex-direction:column;gap:10px;padding:12px 20px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+        padding:12px 16px;display:flex;align-items:center;gap:12px}
+  .card.ok{border-left:4px solid var(--ok)} .card.low{border-left:4px solid var(--low)} .card.out{border-left:4px solid var(--out)}
+  .info{flex:1;min-width:0;text-align:left}
+  .info .name{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .info .name.done{text-decoration:line-through;color:var(--sub)}
+  .meta{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:11px}
+  .badge{border-radius:6px;padding:2px 6px;font-weight:600}
+  .badge.ok{background:var(--ok-bg);color:var(--ok)} .badge.low{background:var(--low-bg);color:var(--low)} .badge.out{background:var(--out-bg);color:var(--out)}
+  .cat{color:var(--sub)}
+
+  .stepper{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .stepper button{width:36px;font-size:20px;font-weight:700;background:#F7F6F1;color:var(--ink)}
+  .stepper button:disabled{color:#C6C4BA;background:#F2F1EB}
+  .stepper button:active:not(:disabled){opacity:.6}
+  .qty{width:56px;text-align:center;padding:5px 0}
+  .qty b{font-family:var(--mono);font-size:18px;line-height:1;display:block}
+  .qty span{color:var(--sub);font-size:10px}
+  .qty.ok b{color:var(--ok)} .qty.low b{color:var(--low)} .qty.out b{color:var(--out)}
+
+  .restock{background:var(--ok-bg);color:var(--ok);font-size:12px;font-weight:700;border-radius:10px;padding:9px 12px}
+  input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent)}
+
+  .empty{text-align:center;padding:36px 32px 0;color:var(--sub);font-size:14px}
+  .empty .big{font-size:40px}
+  .empty b{color:var(--ink);display:block;margin:8px 0 4px;font-size:15px}
+  .quick{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:16px}
+  .quick button{background:#FFF;border:1px solid var(--line);color:var(--accent);
+                border-radius:999px;padding:7px 14px;font-size:12px;font-weight:600}
+  .hint{color:var(--sub);font-size:11px;padding:14px 20px 0}
+
+  .fab{position:fixed;bottom:24px;right:max(24px,calc(50% - 216px));width:56px;height:56px;border-radius:50%;
+       background:var(--accent);color:#FFF;font-size:30px;box-shadow:0 4px 14px rgba(14,94,99,.4);
+       display:flex;align-items:center;justify-content:center;z-index:20}
+
+  .overlay{position:fixed;inset:0;background:rgba(20,22,20,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50}
+  .sheet{background:var(--bg);width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px 20px 34px;max-height:90vh;overflow-y:auto}
+  .sheet h2{font-size:17px;font-weight:800}
+  .sheet .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .sheet .x{font-size:24px;color:var(--sub);padding:0 4px}
+  label{display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px}
+  .field{width:100%;background:#FFF;border:1px solid var(--line);border-radius:12px;padding:11px 14px;outline:none;margin-bottom:16px}
+  .row{display:flex;gap:10px}
+  .row>div{flex:1}
+  .note{color:var(--sub);font-size:11px;margin:-8px 0 18px}
+  .primary{width:100%;background:var(--accent);color:#FFF;font-weight:700;font-size:14px;border-radius:12px;padding:13px 0}
+  .primary:disabled{background:#C9CFC9}
+  .danger{width:100%;color:var(--out);font-weight:600;font-size:13px;padding:10px 0;margin-top:6px}
+
+  .gate{padding:60px 28px;text-align:center}
+  .gate .big{font-size:44px}
+  .gate h1{margin:10px 0 6px}
+  .gate p{color:var(--sub);font-size:13px;line-height:1.5;margin-bottom:20px}
+  .gate input{width:100%;text-align:center;font-family:var(--mono);font-size:16px;letter-spacing:.05em}
+  .gate .alt{color:var(--sub);font-size:12px;margin-top:14px}
+  .gate .alt button{color:var(--accent);font-weight:600;text-decoration:underline;font-size:12px}
+
+  .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:#FFF;
+         font-size:12px;border-radius:10px;padding:9px 16px;z-index:60;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.show{opacity:1}
+  .offline{background:var(--low-bg);color:var(--low);font-size:11px;border-radius:10px;padding:8px 12px;margin:10px 20px 0;display:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+// ================================================================
+// 1) PASTE YOUR FIREBASE CONFIG HERE
+//    Firebase console → Project settings → Your apps → SDK setup
+// ================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyA98Bv8XZkEIQ20CHm5Ye_jIo9QqT2LP7o",
+  authDomain: "team-knowledge-base-d0cff.firebaseapp.com",
+  projectId: "team-knowledge-base-d0cff",
+  storageBucket: "team-knowledge-base-d0cff.firebasestorage.app",
+  messagingSenderId: "1082019092066",
+  appId: "1:1082019092066:web:f629ca570dec1cef46a33b",
+  measurementId: "G-Y5NSZ6TP0G"
+};
+// ================================================================
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const fbApp = initializeApp(firebaseConfig);
+const db = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+
+const CATEGORIES = [
+  { id:"kitchen",  label:"Kitchen",       icon:"🍳" },
+  { id:"bathroom", label:"Bathroom",      icon:"🛁" },
+  { id:"cleaning", label:"Cleaning",      icon:"🧹" },
+  { id:"laundry",  label:"Laundry",       icon:"🧺" },
+  { id:"personal", label:"Personal care", icon:"🪥" },
+  { id:"other",    label:"Other",         icon:"📦" },
+];
+const UNITS = ["pcs","rolls","packs","bottles","boxes","bags","kg","L"];
+const QUICK = [
+  { name:"Kitchen towel",     category:"kitchen",  unit:"rolls",   qty:6,  threshold:2 },
+  { name:"Toilet paper",      category:"bathroom", unit:"rolls",   qty:12, threshold:4 },
+  { name:"Dish soap",         category:"kitchen",  unit:"bottles", qty:2,  threshold:1 },
+  { name:"Laundry detergent", category:"laundry",  unit:"bottles", qty:1,  threshold:1 },
+  { name:"Trash bags",        category:"cleaning", unit:"packs",   qty:3,  threshold:1 },
+  { name:"Hand soap",         category:"bathroom", unit:"bottles", qty:2,  threshold:1 },
+];
+
+const $ = (s)=>document.querySelector(s);
+const app = $("#app");
+const esc = (s)=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const statusOf = (i)=> i.qty<=0 ? "out" : i.qty<=i.threshold ? "low" : "ok";
+const stLabel = { ok:"In stock", low:"Running low", out:"Out" };
+const catOf = (id)=> CATEGORIES.find(c=>c.id===id) || CATEGORIES[5];
+const toast = (msg)=>{ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); };
+
+// ---------- state ----------
+let houseCode = localStorage.getItem("homestock-house") || "";
+let items = [];
+let view = "stock", search = "", catFilter = "all";
+let unsub = null;
+
+// ---------- house gate ----------
+function randomCode(){
+  const words=["mango","lotus","orchid","kopi","merlion","durian","jasmine","bamboo"];
+  return words[Math.floor(Math.random()*words.length)]+"-home-"+Math.floor(1000+Math.random()*9000);
+}
+function renderGate(){
+  const suggestion = randomCode();
+  app.innerHTML = `
+    <div class="gate">
+      <div class="big">🏠</div>
+      <h1>HomeStock</h1>
+      <p>One shared stock list for the whole household.<br>
+         Enter your house code — everyone who uses the same code sees the same list.</p>
+      <input class="field" id="codeIn" placeholder="e.g. ${suggestion}" autocapitalize="none" autocomplete="off">
+      <button class="primary" id="joinBtn">Open my house</button>
+      <div class="alt">Setting up for the first time? <button id="newBtn">Create a new house code</button></div>
+    </div>`;
+  $("#joinBtn").onclick = ()=>{
+    const code = $("#codeIn").value.trim().toLowerCase().replace(/\s+/g,"-");
+    if(!code) return;
+    houseCode = code; localStorage.setItem("homestock-house", code); connect(); 
+  };
+  $("#newBtn").onclick = ()=>{ $("#codeIn").value = suggestion; };
+  $("#codeIn").addEventListener("keydown", e=>{ if(e.key==="Enter") $("#joinBtn").click(); });
+}
+
+// ---------- firestore ----------
+function itemsCol(){ return collection(db, "households", houseCode, "items"); }
+function connect(){
+  if(unsub) unsub();
+  unsub = onSnapshot(itemsCol(), snap=>{
+    items = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    render();
+  }, err=>{
+    console.error(err);
+    toast("Connection problem — check your setup");
+  });
+  render();
+}
+async function saveItem(data, id){
+  const payload = {
+    name:data.name.trim(), category:data.category, unit:data.unit,
+    qty:Math.max(0, Number(data.qty)||0),
+    threshold:Math.max(0, Number(data.threshold)||0),
+    updatedAt:serverTimestamp()
+  };
+  if(id){
+    const prev = items.find(i=>i.id===id) || {};
+    payload.fullQty = Math.max(prev.fullQty||1, payload.qty);
+    await updateDoc(doc(itemsCol(), id), payload);
+  } else {
+    payload.fullQty = Math.max(1, payload.qty);
+    payload.bought = false;
+    payload.createdAt = serverTimestamp();
+    await setDoc(doc(itemsCol()), payload);
+  }
+}
+async function changeQty(id, delta){
+  const it = items.find(i=>i.id===id); if(!it) return;
+  await updateDoc(doc(itemsCol(), id), {
+    qty: Math.max(0, it.qty+delta),
+    fullQty: Math.max(it.fullQty||1, it.qty+delta),
+    bought:false, updatedAt:serverTimestamp()
+  });
+}
+async function restock(id){
+  const it = items.find(i=>i.id===id); if(!it) return;
+  await updateDoc(doc(itemsCol(), id), {
+    qty: Math.max(it.fullQty||1, it.threshold+1), bought:false, updatedAt:serverTimestamp()
+  });
+  toast(`${it.name} restocked`);
+}
+async function toggleBought(id, v){ await updateDoc(doc(itemsCol(), id), { bought:v }); }
+async function removeItem(id){ await deleteDoc(doc(itemsCol(), id)); }
+
+// ---------- render ----------
+function render(){
+  if(!houseCode){ renderGate(); return; }
+  const low = items.filter(i=>statusOf(i)!=="ok");
+  const rank = { out:0, low:1, ok:2 };
+
+  let listHTML = "";
+  if(view==="stock"){
+    let vis = items
+      .filter(i=> catFilter==="all" || i.category===catFilter)
+      .filter(i=> !search || i.name.toLowerCase().includes(search.toLowerCase()))
+      .sort((a,b)=> rank[statusOf(a)]-rank[statusOf(b)] || a.name.localeCompare(b.name));
+    if(items.length===0){
+      listHTML = `<div class="empty"><div class="big">🏠</div><b>Start your stock check</b>
+        Add items with the + button, or start with the usual suspects:
+        <div class="quick">${QUICK.map((q,i)=>`<button data-quick="${i}">+ ${esc(q.name)}</button>`).join("")}</div></div>`;
+    } else if(vis.length===0){
+      listHTML = `<div class="empty">No items match. Try a different search or category.</div>`;
+    } else {
+      listHTML = `<div class="list">${vis.map(cardHTML).join("")}</div>`;
+    }
+  } else {
+    const sorted = [...low].sort((a,b)=>rank[statusOf(a)]-rank[statusOf(b)]);
+    listHTML = low.length===0
+      ? `<div class="empty"><div class="big">✅</div><b>Nothing to buy</b>
+         Everything is above its low-stock level. Items appear here automatically when they run low.</div>`
+      : `<div class="hint">Tick items as you buy them, then tap Restocked to update your stock.</div>
+         <div class="list">${sorted.map(shopHTML).join("")}</div>`;
+  }
+
+  app.innerHTML = `
+    <header>
+      <div class="headrow">
+        <div>
+          <div class="brand">HomeStock</div>
+          <h1>House supplies</h1>
+        </div>
+        <div class="count"><b>${items.length}</b><span>items tracked</span></div>
+      </div>
+      <div class="house">House: <b>${esc(houseCode)}</b> · <button id="leaveBtn">switch</button></div>
+      <div class="offline" id="offline">You're offline — changes will sync when you reconnect.</div>
+    </header>
+    <div class="tabs">
+      <button class="${view==="stock"?"on":""}" data-view="stock">Stock</button>
+      <button class="${view==="shopping"?"on":""}" data-view="shopping">Shopping list${low.length?` (${low.length})`:""}</button>
+    </div>
+    ${view==="stock" ? `
+      <div class="search"><input id="searchIn" placeholder="Search items" value="${esc(search)}"></div>
+      <div class="chips">
+        <button class="chip ${catFilter==="all"?"on":""}" data-cat="all">All</button>
+        ${CATEGORIES.map(c=>`<button class="chip ${catFilter===c.id?"on":""}" data-cat="${c.id}">${c.icon} ${c.label}</button>`).join("")}
+      </div>` : ""}
+    ${listHTML}
+    <button class="fab" id="addBtn" aria-label="Add item">+</button>`;
+
+  bind();
+  updateOffline();
+}
+
+function cardHTML(i){
+  const st = statusOf(i), cat = catOf(i.category);
+  return `<div class="card ${st}">
+    <button class="info" data-edit="${i.id}">
+      <div class="name">${esc(i.name)}</div>
+      <div class="meta"><span class="badge ${st}">${stLabel[st]}</span><span class="cat">${cat.icon} ${cat.label}</span></div>
+    </button>
+    <div class="stepper">
+      <button data-dec="${i.id}" ${i.qty<=0?"disabled":""}>−</button>
+      <div class="qty ${st}"><b>${i.qty}</b><span>${esc(i.unit)}</span></div>
+      <button data-inc="${i.id}">+</button>
+    </div>
+  </div>`;
+}
+function shopHTML(i){
+  const st = statusOf(i);
+  return `<div class="card">
+    <input type="checkbox" data-buy="${i.id}" ${i.bought?"checked":""}>
+    <div class="info">
+      <div class="name ${i.bought?"done":""}">${esc(i.name)}</div>
+      <div class="meta"><span class="badge ${st}">${stLabel[st]} · ${i.qty} ${esc(i.unit)} left</span></div>
+    </div>
+    <button class="restock" data-restock="${i.id}">Restocked</button>
+  </div>`;
+}
+
+function bind(){
+  $("#addBtn").onclick = ()=>openModal();
+  $("#leaveBtn").onclick = ()=>{ if(confirm("Switch to a different house code?")){ localStorage.removeItem("homestock-house"); houseCode=""; if(unsub)unsub(); render(); } };
+  document.querySelectorAll("[data-view]").forEach(b=> b.onclick=()=>{ view=b.dataset.view; render(); });
+  document.querySelectorAll("[data-cat]").forEach(b=> b.onclick=()=>{ catFilter=b.dataset.cat; render(); });
+  document.querySelectorAll("[data-inc]").forEach(b=> b.onclick=()=>changeQty(b.dataset.inc, 1));
+  document.querySelectorAll("[data-dec]").forEach(b=> b.onclick=()=>changeQty(b.dataset.dec, -1));
+  document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=>openModal(items.find(i=>i.id===b.dataset.edit)));
+  document.querySelectorAll("[data-restock]").forEach(b=> b.onclick=()=>restock(b.dataset.restock));
+  document.querySelectorAll("[data-buy]").forEach(b=> b.onchange=()=>toggleBought(b.dataset.buy, b.checked));
+  document.querySelectorAll("[data-quick]").forEach(b=> b.onclick=()=>saveItem(QUICK[Number(b.dataset.quick)]));
+  const s = $("#searchIn");
+  if(s){ s.oninput = ()=>{ search=s.value; render(); const n=$("#searchIn"); n.focus(); n.setSelectionRange(n.value.length,n.value.length); }; }
+}
+
+// ---------- modal ----------
+function openModal(item){
+  const editing = !!item;
+  const f = editing ? {...item} : { name:"", category:"kitchen", unit:"pcs", qty:1, threshold:1 };
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  ov.innerHTML = `<div class="sheet">
+    <div class="top"><h2>${editing?"Edit item":"Add item"}</h2><button class="x">×</button></div>
+    <label>Item name</label>
+    <input class="field" id="fName" placeholder="e.g. Kitchen towel" value="${esc(f.name)}">
+    <label>Category</label>
+    <div class="chips" style="padding:0 0 16px;flex-wrap:wrap">
+      ${CATEGORIES.map(c=>`<button class="chip ${f.category===c.id?"on":""}" data-c="${c.id}">${c.icon} ${c.label}</button>`).join("")}
+    </div>
+    <div class="row">
+      <div><label>Quantity</label><input class="field" id="fQty" type="number" min="0" value="${f.qty}"></div>
+      <div><label>Unit</label><select class="field" id="fUnit">${UNITS.map(u=>`<option ${f.unit===u?"selected":""}>${u}</option>`).join("")}</select></div>
+      <div><label>Low at</label><input class="field" id="fThr" type="number" min="0" value="${f.threshold}"></div>
+    </div>
+    <div class="note">"Low at" is the level where this item joins your shopping list.</div>
+    <button class="primary" id="fSave">${editing?"Save changes":"Add to stock"}</button>
+    ${editing?`<button class="danger" id="fDel">Delete item</button>`:""}
+  </div>`;
+  document.body.appendChild(ov);
+  const close = ()=>ov.remove();
+  ov.onclick = (e)=>{ if(e.target===ov) close(); };
+  ov.querySelector(".x").onclick = close;
+  ov.querySelectorAll("[data-c]").forEach(b=> b.onclick=()=>{ f.category=b.dataset.c;
+    ov.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on", x.dataset.c===f.category)); });
+  ov.querySelector("#fSave").onclick = async ()=>{
+    f.name = ov.querySelector("#fName").value;
+    if(!f.name.trim()) return;
+    f.qty = ov.querySelector("#fQty").value;
+    f.unit = ov.querySelector("#fUnit").value;
+    f.threshold = ov.querySelector("#fThr").value;
+    close();
+    await saveItem(f, editing?item.id:null);
+    if(!editing) toast(`${f.name.trim()} added`);
+  };
+  const del = ov.querySelector("#fDel");
+  if(del) del.onclick = async ()=>{ if(confirm(`Delete ${item.name}?`)){ close(); await removeItem(item.id); } };
+  if(!editing) ov.querySelector("#fName").focus();
+}
+
+// ---------- offline banner + service worker ----------
+function updateOffline(){ const o=$("#offline"); if(o) o.style.display = navigator.onLine ? "none" : "block"; }
+window.addEventListener("online", updateOffline);
+window.addEventListener("offline", updateOffline);
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+
+// ---------- start ----------
+if(houseCode) connect(); else renderGate();
+</script>
+</body>
+</html>
