@@ -133,7 +133,7 @@
 //    Firebase console → Project settings → Your apps → SDK setup
 // ================================================================
 const firebaseConfig = {
-  apiKey: "AQ.Ab8RN6J2rpNrR2R0LpJ8POhPWlpOW1Pku8Db1wDOiDOc2hbkWA",
+  apiKey: "AIzaSyA98Bv8XZkEIQ20CHm5Ye_jIo9QqT2LP7o",
   authDomain: "team-knowledge-base-d0cff.firebaseapp.com",
   projectId: "team-knowledge-base-d0cff",
   storageBucket: "team-knowledge-base-d0cff.firebasestorage.app",
@@ -144,11 +144,11 @@ const firebaseConfig = {
 // ================================================================
 
 // ================================================================
-// 2) OPTIONAL: PHOTO COUNTING — paste a Google Gemini API key here
-//    Get a free key at https://aistudio.google.com  (see setup note)
-//    Leave as "" to hide the photo feature.
+// 2) PHOTO COUNTING via Firebase AI Logic (no API key needed).
+//    Requires enabling "AI Logic" in the Firebase console — see setup.
+//    Set to false to hide the photo button.
 // ================================================================
-const GEMINI_API_KEY = "AQ.Ab8RN6J2rpNrR2R0LpJ8POhPWlpOW1Pku8Db1wDOiDOc2hbkWA";
+const PHOTO_COUNTING_ENABLED = true;
 // ================================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -156,11 +156,19 @@ import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-ai.js";
 
 const fbApp = initializeApp(firebaseConfig);
 const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 });
+
+// Firebase AI Logic — Gemini via the Google AI backend (no API key in page)
+let aiModel = null;
+try {
+  const ai = getAI(fbApp, { backend: new GoogleAIBackend() });
+  aiModel = getGenerativeModel(ai, { model: "gemini-2.5-flash" });
+} catch(e){ console.warn("AI Logic init failed:", e); }
 
 const CATEGORIES = [
   { id:"kitchen",  label:"Kitchen",       icon:"🍳" },
@@ -363,23 +371,14 @@ async function shrinkImage(file, max=1024){
   return c.toDataURL("image/jpeg", 0.8).split(",")[1];
 }
 async function countFromPhoto(file, name, unit){
+  if(!aiModel) throw new Error("AI not ready — enable AI Logic in Firebase");
   const b64 = await shrinkImage(file);
   const prompt = `You are doing a household stock take. Count how many "${name}" are visible in this photo, in units of "${unit}". Count individual sellable units (e.g. each roll, bottle, pack or box). Partially visible units count as one. If a multipack's label states its contents (e.g. "10 rolls") and the pack is unopened, use the stated number. Respond ONLY with minified JSON, no markdown: {"count": <integer>, "note": "<max 12 words: what you counted or any uncertainty>"}`;
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent`,
-    { method:"POST", headers:{ "Content-Type":"application/json", "X-goog-api-key": GEMINI_API_KEY },
-      body: JSON.stringify({ contents:[{ parts:[
-        { inline_data:{ mime_type:"image/jpeg", data:b64 } },
-        { text: prompt }
-      ]}]}) });
-  const raw = await res.text();
-  if(!res.ok){
-    let msg = `HTTP ${res.status}`;
-    try { msg = JSON.parse(raw).error?.message || msg; } catch(e){}
-    throw new Error(msg);
-  }
-  const data = JSON.parse(raw);
-  const txt = (data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+  const result = await aiModel.generateContent([
+    { inlineData: { mimeType: "image/jpeg", data: b64 } },
+    { text: prompt }
+  ]);
+  const txt = result.response.text();
   if(!txt) throw new Error("Empty response (image may have been blocked)");
   const clean = txt.replace(/```json|```/g,"").trim();
   let out;
@@ -537,7 +536,7 @@ function openModal(item){
       <div><label>Unit</label><select class="field" id="fUnit">${UNITS.map(u=>`<option ${f.unit===u?"selected":""}>${u}</option>`).join("")}</select></div>
       <div><label>Low at</label><input class="field" id="fThr" type="number" min="0" value="${f.threshold}"></div>
     </div>
-    ${GEMINI_API_KEY ? `<button class="photobtn" id="fPhoto">📷 Count from photo</button>
+    ${PHOTO_COUNTING_ENABLED ? `<button class="photobtn" id="fPhoto">📷 Count from photo</button>
     <input type="file" id="fPhotoIn" accept="image/*" capture="environment" style="display:none">` : ""}
     <div class="note">"Low at" is the level where this item joins your shopping list.</div>
     <button class="primary" id="fSave">${editing?"Save changes":"Add to stock"}</button>
