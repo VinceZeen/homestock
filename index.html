@@ -144,6 +144,21 @@ const firebaseConfig = {
 // ================================================================
 
 // ================================================================
+// 1b) AI-ONLY CONFIG — the free-tier "homestock" project.
+//     Used ONLY for photo counting. Your data stays on the project above.
+// ================================================================
+const aiFirebaseConfig = {
+  apiKey: "AIzaSyAjLqh6tzjQiivQf3B3fMwh1_Zurb1mJMU",
+  authDomain: "homestock-bbd02.firebaseapp.com",
+  projectId: "homestock-bbd02",
+  storageBucket: "homestock-bbd02.firebasestorage.app",
+  messagingSenderId: "677386612025",
+  appId: "1:677386612025:web:46a1bbf732302875dc0ce8",
+  measurementId: "G-GSS8H08S35"
+};
+// ================================================================
+
+// ================================================================
 // 2) PHOTO COUNTING via Firebase AI Logic (no API key needed).
 //    Requires enabling "AI Logic" in the Firebase console — see setup.
 //    Set to false to hide the photo button.
@@ -163,10 +178,11 @@ const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 });
 
-// Firebase AI Logic — Gemini via the Google AI backend (no API key in page)
+// Firebase AI Logic — runs on the free-tier "homestock" project (separate app instance)
 let aiModel = null;
 try {
-  const ai = getAI(fbApp, { backend: new GoogleAIBackend() });
+  const aiApp = initializeApp(aiFirebaseConfig, "ai");
+  const ai = getAI(aiApp, { backend: new GoogleAIBackend() });
   aiModel = getGenerativeModel(ai, { model: "gemini-2.5-flash" });
 } catch(e){ console.warn("AI Logic init failed:", e); }
 
