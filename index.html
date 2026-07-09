@@ -55,6 +55,12 @@
   .infotext{flex:1;min-width:0}
   .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#F2F1EB}
   .thumb-ph{display:flex;align-items:center;justify-content:center;font-size:18px}
+  img.thumb{cursor:zoom-in}
+
+  .lightbox{position:fixed;inset:0;background:rgba(20,22,20,.85);display:flex;align-items:center;justify-content:center;z-index:70;cursor:zoom-out}
+  .lightbox figure{display:flex;flex-direction:column;align-items:center;gap:12px;max-width:92vw}
+  .lightbox img{max-width:92vw;max-height:80vh;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+  .lightbox figcaption{color:#FFF;font-size:14px;font-weight:600;text-align:center}
   .info .name{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .info .name.done{text-decoration:line-through;color:var(--sub)}
   .meta{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:11px}
@@ -502,8 +508,15 @@ function render(){
 function thumbHTML(i){
   const cat = catOf(i.category);
   return i.photo
-    ? `<img src="${i.photo}" class="thumb" alt="">`
+    ? `<img src="${i.photo}" class="thumb" data-zoom="${i.id}" alt="Photo of ${esc(i.name)}">`
     : `<div class="thumb thumb-ph">${cat.icon}</div>`;
+}
+function openLightbox(src, name){
+  const ov = document.createElement("div");
+  ov.className = "lightbox";
+  ov.innerHTML = `<figure><img src="${src}" alt="${esc(name)}"><figcaption>${esc(name)}</figcaption></figure>`;
+  ov.onclick = ()=>ov.remove();
+  document.body.appendChild(ov);
 }
 function cardHTML(i){
   const st = statusOf(i), cat = catOf(i.category);
@@ -544,6 +557,12 @@ function bind(){
   document.querySelectorAll("[data-inc]").forEach(b=> b.onclick=()=>changeQty(b.dataset.inc, 1));
   document.querySelectorAll("[data-dec]").forEach(b=> b.onclick=()=>changeQty(b.dataset.dec, -1));
   document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=>openModal(items.find(i=>i.id===b.dataset.edit)));
+  // stopPropagation: on the stock list the thumbnail sits inside the edit button — zoom instead of opening the editor
+  document.querySelectorAll("[data-zoom]").forEach(el=> el.onclick=(e)=>{
+    e.stopPropagation();
+    const it = items.find(i=>i.id===el.dataset.zoom);
+    if(it && it.photo) openLightbox(it.photo, it.name);
+  });
   document.querySelectorAll("[data-restock]").forEach(b=> b.onclick=()=>restock(b.dataset.restock));
   document.querySelectorAll("[data-advice]").forEach(b=> b.onclick=()=>{
     const it = items.find(i=>i.id===b.dataset.advice); if(it) openAdvice(it);
@@ -597,10 +616,12 @@ function openModal(item){
   const previewWrap = ov.querySelector("#photoPreviewWrap");
   function renderPreview(){
     previewWrap.innerHTML = f.photo
-      ? `<div class="photopreview-wrap"><img src="${f.photo}" class="photopreview"><button type="button" class="photopreview-x" id="fPhotoRemove">×</button></div>`
+      ? `<div class="photopreview-wrap"><img src="${f.photo}" class="photopreview" style="cursor:zoom-in"><button type="button" class="photopreview-x" id="fPhotoRemove">×</button></div>`
       : "";
     const rm = previewWrap.querySelector("#fPhotoRemove");
     if(rm) rm.onclick = ()=>{ f.photo = null; renderPreview(); };
+    const pv = previewWrap.querySelector(".photopreview");
+    if(pv) pv.onclick = ()=>openLightbox(f.photo, ov.querySelector("#fName").value.trim() || "Photo");
   }
   renderPreview();
 
