@@ -102,6 +102,21 @@
   .fab{position:fixed;bottom:24px;right:max(24px,calc(50% - 216px));width:56px;height:56px;border-radius:50%;
        background:var(--accent);color:#FFF;font-size:30px;box-shadow:0 4px 14px rgba(14,94,99,.4);
        display:flex;align-items:center;justify-content:center;z-index:20}
+  .fab-ai{bottom:92px;background:var(--ink);font-size:22px;box-shadow:0 4px 14px rgba(28,30,28,.35)}
+
+  .chatwrap{display:flex;flex-direction:column;height:72vh;min-height:320px}
+  .chatlog{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:2px}
+  .msg{max-width:85%;border-radius:14px;padding:9px 13px;font-size:13px;line-height:1.55;
+       white-space:pre-wrap;word-break:break-word}
+  .msg.user{align-self:flex-end;background:var(--accent);color:#FFF;border-bottom-right-radius:4px}
+  .msg.ai{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg.wait{color:var(--sub);animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+  .chatsugg{display:flex;flex-wrap:wrap;gap:8px;padding:4px 2px}
+  .chatrow{display:flex;gap:8px;margin-top:12px}
+  .chatrow .field{flex:1;margin-bottom:0}
+  .chatsend{background:var(--accent);color:#FFF;font-weight:700;font-size:13px;border-radius:12px;padding:0 18px}
+  .chatsend:disabled{background:#C9CFC9}
 
   .overlay{position:fixed;inset:0;background:rgba(20,22,20,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50}
   .sheet{background:var(--bg);width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px 20px 34px;max-height:90vh;overflow-y:auto}
@@ -200,7 +215,7 @@ import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-ai.js";
+import { getAI, getGenerativeModel, GoogleAIBackend, Schema } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-ai.js";
 
 const fbApp = initializeApp(firebaseConfig);
 const db = initializeFirestore(fbApp, {
@@ -208,11 +223,11 @@ const db = initializeFirestore(fbApp, {
 });
 
 // Firebase AI Logic — runs on the free-tier "homestock" project (separate app instance)
-let aiModel = null;
+let aiModel = null, aiLogic = null;
 try {
   const aiApp = initializeApp(aiFirebaseConfig, "ai");
-  const ai = getAI(aiApp, { backend: new GoogleAIBackend() });
-  aiModel = getGenerativeModel(ai, {
+  aiLogic = getAI(aiApp, { backend: new GoogleAIBackend() });
+  aiModel = getGenerativeModel(aiLogic, {
     model: "gemini-2.5-flash",
     generationConfig: { responseMimeType: "application/json" }
   });
@@ -280,6 +295,7 @@ function renderGate(){
 function itemsCol(){ return collection(db, "households", houseCode, "items"); }
 function connect(){
   if(unsub) unsub();
+  agentChat = null; chatLog = []; // assistant memory is per-house
   unsub = onSnapshot(itemsCol(), snap=>{
     items = snap.docs.map(d=>({ id:d.id, ...d.data() }));
     render();
@@ -408,6 +424,204 @@ function advise(item){
     { label:"Shopee SG", sub:"1–3 days", url:`https://shopee.sg/search?keyword=${en}` },
     { label:"FairPrice", sub:"today / next day", url:`https://www.fairprice.com.sg/search?query=${en}` },
   ]};
+}
+
+// ---------- AI assistant agent ----------
+// A chat agent over the same Firebase AI Logic project. It gets tools to read
+// and change the stock list, so "we're out of dish soap" actually updates Firestore.
+const AGENT_PROMPT = `You are the HomeStock assistant — an AI agent inside a shared household-supplies tracker used by a family in Singapore.
+Each item has a quantity, a unit, and a "low at" threshold. At or below the threshold it is "low"; at 0 it is "out". Low and out items appear on the shopping list automatically.
+Rules:
+- Always call get_inventory before answering anything about stock, so you work from the live list.
+- When the user says they used, finished, bought or found something, update it with tools (set_quantity, restock_item, add_item) — don't just talk about it. Report what you changed.
+- When adding items, pick a sensible category and unit yourself; only ask if the item is genuinely ambiguous. Defaults: qty 1, low at 1.
+- Only call remove_item when the user clearly asked to delete; otherwise confirm first.
+- For "where should I buy X" use purchase_advice and summarize the verdict and reason in 1-2 sentences. Mention they can tap "💡 Where?" on the shopping list for direct store links.
+- Item names in tool calls can be approximate — the app matches them loosely — but prefer the exact names from get_inventory.
+- Keep replies short, warm and phone-friendly: plain text, short lines, the item's own unit. No markdown tables or headings.`;
+
+const agentTools = [{ functionDeclarations: [
+  { name:"get_inventory",
+    description:"Read the household's live stock list: every item with its quantity, unit, low-at threshold, status (ok/low/out), category, and whether it's already ticked as bought on the shopping list." },
+  { name:"add_item",
+    description:"Add a new item to the stock list. Fails if an item with the same name already exists.",
+    parameters: Schema.object({ properties:{
+      name: Schema.string({ description:"Item name, e.g. 'Toilet paper'" }),
+      qty: Schema.number({ description:"Quantity currently on hand. Default 1." }),
+      unit: Schema.enumString({ enum:UNITS, description:"Unit of measure. Default 'pcs'." }),
+      category: Schema.enumString({ enum:CATEGORIES.map(c=>c.id), description:"Category. Default 'other'." }),
+      threshold: Schema.number({ description:"Low-stock level ('low at'). Default 1." }),
+    }, optionalProperties:["qty","unit","category","threshold"] }) },
+  { name:"set_quantity",
+    description:"Set an existing item's quantity to an exact number (0 = out of stock).",
+    parameters: Schema.object({ properties:{
+      name: Schema.string({ description:"Name of an existing item" }),
+      qty: Schema.number({ description:"New quantity on hand" }),
+    } }) },
+  { name:"restock_item",
+    description:"Mark an item as restocked: quantity returns to its usual full level and it leaves the shopping list.",
+    parameters: Schema.object({ properties:{ name: Schema.string({ description:"Name of an existing item" }) } }) },
+  { name:"mark_bought",
+    description:"Tick or untick an item as bought on the shopping list (does not change its quantity).",
+    parameters: Schema.object({ properties:{
+      name: Schema.string({ description:"Name of an existing item" }),
+      bought: Schema.boolean({ description:"true = ticked as bought" }),
+    } }) },
+  { name:"remove_item",
+    description:"Delete an item from the stock list entirely. Only after the user clearly asked for deletion.",
+    parameters: Schema.object({ properties:{ name: Schema.string({ description:"Name of an existing item" }) } }) },
+  { name:"purchase_advice",
+    description:"Get Singapore buying advice for an item: whether to buy locally (FairPrice / Shopee SG) or bulk-order from China (Taobao / Pinduoduo), with reasoning based on stock level and item type.",
+    parameters: Schema.object({ properties:{ name: Schema.string({ description:"Name of an existing item" }) } }) },
+]}];
+
+let agentModel = null;
+try {
+  if(aiLogic) agentModel = getGenerativeModel(aiLogic, {
+    model: "gemini-2.5-flash",
+    systemInstruction: AGENT_PROMPT,
+    tools: agentTools
+  });
+} catch(e){ console.warn("Assistant init failed:", e); }
+
+function findByName(name){
+  const key = String(name||"").trim().toLowerCase();
+  if(!key) return null;
+  return items.find(i=>i.name.trim().toLowerCase()===key)
+      || items.find(i=>i.name.toLowerCase().includes(key) || key.includes(i.name.toLowerCase()))
+      || null;
+}
+async function runAgentTool(name, args){
+  const need = ()=>{
+    const it = findByName(args.name);
+    if(!it) throw new Error(`No item called "${args.name}" in the list`);
+    return it;
+  };
+  switch(name){
+    case "get_inventory":
+      return { house: houseCode, items: items.map(i=>({
+        name:i.name, qty:i.qty, unit:i.unit, lowAt:i.threshold,
+        status:statusOf(i), category:i.category, boughtTick: !!i.bought
+      })) };
+    case "add_item": {
+      if(findByName(args.name)) return { error:`"${args.name}" is already in the list — use set_quantity instead` };
+      const created = await saveItem({
+        name: String(args.name||""),
+        category: CATEGORIES.some(c=>c.id===args.category) ? args.category : "other",
+        unit: UNITS.includes(args.unit) ? args.unit : "pcs",
+        qty: args.qty ?? 1, threshold: args.threshold ?? 1
+      });
+      return created ? { ok:true } : { error:"could not add the item" };
+    }
+    case "set_quantity": {
+      const it = need();
+      const qty = Math.max(0, Math.round(Number(args.qty)||0));
+      await updateDoc(doc(itemsCol(), it.id), {
+        qty, fullQty: Math.max(it.fullQty||1, qty), bought:false, updatedAt:serverTimestamp()
+      });
+      return { ok:true, name:it.name, qty, unit:it.unit, status: qty<=0?"out":qty<=it.threshold?"low":"ok" };
+    }
+    case "restock_item": {
+      const it = need();
+      await restock(it.id);
+      return { ok:true, name:it.name, qty: Math.max(it.fullQty||1, it.threshold+1), unit:it.unit };
+    }
+    case "mark_bought": {
+      const it = need();
+      await toggleBought(it.id, args.bought !== false);
+      return { ok:true, name:it.name, boughtTick: args.bought !== false };
+    }
+    case "remove_item": {
+      const it = need();
+      await removeItem(it.id);
+      return { ok:true, removed:it.name };
+    }
+    case "purchase_advice": {
+      const it = need();
+      const a = advise(it);
+      return { name:it.name, qty:it.qty, unit:it.unit, verdict:a.verdict, reason:a.why,
+               stores: a.links.map(l=>`${l.label} (${l.sub})`) };
+    }
+    default:
+      return { error:`unknown tool ${name}` };
+  }
+}
+
+let agentChat = null, chatLog = [];
+async function sendToAgent(text){
+  if(!agentChat) agentChat = agentModel.startChat();
+  let result = await agentChat.sendMessage(text);
+  // tool loop: execute any function calls and feed results back, bounded to stay safe
+  for(let round=0; round<6; round++){
+    const calls = result.response.functionCalls() || [];
+    if(!calls.length) break;
+    const parts = [];
+    for(const c of calls){
+      let response;
+      try { response = await runAgentTool(c.name, c.args||{}); }
+      catch(e){ response = { error: e.message || "tool failed" }; }
+      parts.push({ functionResponse: { name:c.name, response } });
+    }
+    result = await agentChat.sendMessage(parts);
+  }
+  return result.response.text();
+}
+
+function openAssistant(){
+  if(!agentModel){ toast("AI not ready — enable AI Logic in Firebase"); return; }
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  ov.innerHTML = `<div class="sheet">
+    <div class="top"><h2>✨ Assistant</h2><button class="x">×</button></div>
+    <div class="chatwrap">
+      <div class="chatlog"></div>
+      <div class="chatrow">
+        <input class="field" placeholder="Ask or tell me anything…" autocomplete="off" enterkeyhint="send">
+        <button class="chatsend">Send</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = ()=>ov.remove();
+  ov.onclick = (e)=>{ if(e.target===ov) close(); };
+  ov.querySelector(".x").onclick = close;
+
+  const log = ov.querySelector(".chatlog");
+  const input = ov.querySelector(".chatrow input");
+  const sendBtn = ov.querySelector(".chatsend");
+  let busy = false;
+  const fmt = (t)=>esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+  const SUGGESTIONS = ["What's running low?", "We're out of toilet paper", "Add 6 rolls of kitchen towel", "Where should I buy detergent?"];
+  function paint(){
+    log.innerHTML = chatLog.length
+      ? chatLog.map(m=>`<div class="msg ${m.role}">${fmt(m.text)}</div>`).join("") +
+        (busy ? `<div class="msg ai wait">Thinking…</div>` : "")
+      : `<div class="msg ai">Hi! I keep track of your house supplies. Tell me what you used or bought, ask what's running low, or where to buy something — I'll update the list for you.</div>
+         <div class="chatsugg">${SUGGESTIONS.map(s=>`<button class="chip" data-sugg="${esc(s)}">${esc(s)}</button>`).join("")}</div>`;
+    log.querySelectorAll("[data-sugg]").forEach(b=> b.onclick=()=>send(b.dataset.sugg));
+    log.scrollTop = log.scrollHeight;
+  }
+  async function send(preset){
+    const text = (preset ?? input.value).trim();
+    if(!text || busy) return;
+    input.value = "";
+    chatLog.push({ role:"user", text });
+    busy = true; sendBtn.disabled = true; paint();
+    try {
+      const reply = await sendToAgent(text);
+      chatLog.push({ role:"ai", text: reply?.trim() || "Done." });
+    } catch(e){
+      console.error(e);
+      agentChat = null; // drop the broken turn so the next message starts clean
+      chatLog.push({ role:"ai", text: "Sorry, that didn't work: " + (e.message || "unknown error") });
+    }
+    busy = false; sendBtn.disabled = false; paint();
+    input.focus();
+  }
+  sendBtn.onclick = ()=>send();
+  input.addEventListener("keydown", e=>{ if(e.key==="Enter") send(); });
+  paint();
+  input.focus();
 }
 
 // ---------- photo helpers ----------
@@ -560,6 +774,7 @@ function render(){
         ${CATEGORIES.map(c=>`<button class="chip ${catFilter===c.id?"on":""}" data-cat="${c.id}">${c.icon} ${c.label}</button>`).join("")}
       </div>` : ""}
     ${listHTML}
+    ${agentModel ? `<button class="fab fab-ai" id="aiBtn" aria-label="Open assistant">✨</button>` : ""}
     <button class="fab" id="addBtn" aria-label="Add item">+</button>`;
 
   bind();
@@ -673,6 +888,8 @@ function shopHTML(i){
 
 function bind(){
   $("#addBtn").onclick = ()=>openModal();
+  const ai = $("#aiBtn");
+  if(ai) ai.onclick = openAssistant;
   $("#leaveBtn").onclick = ()=>{ if(confirm("Switch to a different house code?")){ localStorage.removeItem("homestock-house"); houseCode=""; if(unsub)unsub(); render(); } };
   document.querySelectorAll("[data-view]").forEach(b=> b.onclick=()=>{ view=b.dataset.view; render(); });
   document.querySelectorAll("[data-cat]").forEach(b=> b.onclick=()=>{ catFilter=b.dataset.cat; render(); });
