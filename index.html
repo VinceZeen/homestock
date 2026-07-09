@@ -121,6 +121,21 @@
   .photopreview{width:96px;height:96px;object-fit:cover;border-radius:14px;display:block;border:1px solid var(--line)}
   .photopreview-x{position:absolute;top:-7px;right:-7px;background:var(--ink);color:#FFF;width:22px;height:22px;
                   border-radius:50%;font-size:13px;line-height:22px;text-align:center;padding:0}
+  .photopreview-crop{position:absolute;bottom:-7px;right:-7px;background:var(--accent);color:#FFF;width:26px;height:26px;
+                     border-radius:50%;font-size:13px;line-height:26px;text-align:center;padding:0}
+
+  .cropper{position:fixed;inset:0;background:rgba(20,22,20,.94);z-index:80;display:flex;flex-direction:column;
+           align-items:center;justify-content:center;gap:16px;padding:20px}
+  .crop-hint{color:#DDD;font-size:13px;text-align:center}
+  .crop-stage{position:relative;touch-action:none}
+  .crop-stage img{display:block;max-width:88vw;max-height:60vh;border-radius:8px;user-select:none;-webkit-user-select:none;pointer-events:none}
+  .crop-box{position:absolute;border:2px solid #FFF;border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.55);cursor:move;touch-action:none}
+  .crop-handle{position:absolute;right:-13px;bottom:-13px;width:26px;height:26px;border-radius:50%;
+               background:#FFF;border:3px solid var(--accent);cursor:nwse-resize}
+  .crop-actions{display:flex;gap:10px;width:100%;max-width:340px}
+  .crop-actions button{flex:1;border-radius:12px;padding:12px 0;font-weight:700;font-size:14px}
+  .crop-cancel{background:#3A3D3A;color:#FFF}
+  .crop-ok{background:var(--accent);color:#FFF}
   .danger{width:100%;color:var(--out);font-weight:600;font-size:13px;padding:10px 0;margin-top:6px}
 
   .gate{padding:60px 28px;text-align:center}
@@ -511,6 +526,64 @@ function thumbHTML(i){
     ? `<img src="${i.photo}" class="thumb" data-zoom="${i.id}" alt="Photo of ${esc(i.name)}">`
     : `<div class="thumb thumb-ph">${cat.icon}</div>`;
 }
+function openCropper(src, onDone){
+  const ov = document.createElement("div");
+  ov.className = "cropper";
+  ov.innerHTML = `
+    <div class="crop-hint">Frame a single item — the square becomes the thumbnail.<br>Drag to move, use the corner dot to resize.</div>
+    <div class="crop-stage">
+      <img src="${src}">
+      <div class="crop-box"><div class="crop-handle"></div></div>
+    </div>
+    <div class="crop-actions">
+      <button class="crop-cancel">Cancel</button>
+      <button class="crop-ok">Use as thumbnail</button>
+    </div>`;
+  document.body.appendChild(ov);
+  const img = ov.querySelector("img"), box = ov.querySelector(".crop-box"), handle = ov.querySelector(".crop-handle");
+  let st = null;
+  const place = ()=>{
+    box.style.left = st.x+"px"; box.style.top = st.y+"px";
+    box.style.width = st.s+"px"; box.style.height = st.s+"px";
+  };
+  const init = ()=>{
+    const W = img.clientWidth, H = img.clientHeight;
+    if(!W || !H) return;
+    const s = Math.min(W, H)*0.6;
+    st = { x:(W-s)/2, y:(H-s)/2, s, W, H };
+    place();
+  };
+  if(img.complete) init(); else img.onload = init;
+  let drag = null;
+  box.addEventListener("pointerdown", e=>{
+    if(!st) return;
+    drag = { resize: e.target===handle, px:e.clientX, py:e.clientY, x:st.x, y:st.y, s:st.s };
+    box.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  box.addEventListener("pointermove", e=>{
+    if(!drag) return;
+    const dx = e.clientX-drag.px, dy = e.clientY-drag.py;
+    if(drag.resize){
+      st.s = Math.min(Math.max(40, drag.s+Math.max(dx,dy)), Math.min(st.W-st.x, st.H-st.y));
+    } else {
+      st.x = Math.min(Math.max(0, drag.x+dx), st.W-st.s);
+      st.y = Math.min(Math.max(0, drag.y+dy), st.H-st.s);
+    }
+    place();
+  });
+  box.addEventListener("pointerup", ()=>{ drag = null; });
+  ov.querySelector(".crop-cancel").onclick = ()=>ov.remove();
+  ov.querySelector(".crop-ok").onclick = ()=>{
+    if(!st) return;
+    const scale = img.naturalWidth/st.W;
+    const c = document.createElement("canvas");
+    c.width = 480; c.height = 480;
+    c.getContext("2d").drawImage(img, st.x*scale, st.y*scale, st.s*scale, st.s*scale, 0, 0, 480, 480);
+    ov.remove();
+    onDone(c.toDataURL("image/jpeg", 0.72));
+  };
+}
 function openLightbox(src, name){
   const ov = document.createElement("div");
   ov.className = "lightbox";
@@ -614,12 +687,17 @@ function openModal(item){
     ov.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on", x.dataset.c===f.category)); });
 
   const previewWrap = ov.querySelector("#photoPreviewWrap");
+  let origPhoto = null; // full-frame source for (re-)cropping, kept only while the sheet is open
   function renderPreview(){
     previewWrap.innerHTML = f.photo
-      ? `<div class="photopreview-wrap"><img src="${f.photo}" class="photopreview" style="cursor:zoom-in"><button type="button" class="photopreview-x" id="fPhotoRemove">×</button></div>`
+      ? `<div class="photopreview-wrap"><img src="${f.photo}" class="photopreview" style="cursor:zoom-in">
+           <button type="button" class="photopreview-x" id="fPhotoRemove">×</button>
+           <button type="button" class="photopreview-crop" id="fPhotoCrop" aria-label="Crop thumbnail">✂️</button></div>`
       : "";
     const rm = previewWrap.querySelector("#fPhotoRemove");
-    if(rm) rm.onclick = ()=>{ f.photo = null; renderPreview(); };
+    if(rm) rm.onclick = ()=>{ f.photo = null; origPhoto = null; renderPreview(); };
+    const cr = previewWrap.querySelector("#fPhotoCrop");
+    if(cr) cr.onclick = ()=>openCropper(origPhoto || f.photo, cropped=>{ f.photo = cropped; renderPreview(); });
     const pv = previewWrap.querySelector(".photopreview");
     if(pv) pv.onclick = ()=>openLightbox(f.photo, ov.querySelector("#fName").value.trim() || "Photo");
   }
@@ -637,6 +715,7 @@ function openModal(item){
   fileIn.onchange = async ()=>{
     const file = fileIn.files[0]; if(!file) return;
     try {
+      origPhoto = await shrinkImageDataURL(file, 1600, 0.85);
       f.photo = await thumbnailDataURL(file);
       renderPreview();
     } catch(e){ console.error(e); }
