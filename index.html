@@ -51,6 +51,10 @@
         padding:12px 16px;display:flex;align-items:center;gap:12px}
   .card.ok{border-left:4px solid var(--ok)} .card.low{border-left:4px solid var(--low)} .card.out{border-left:4px solid var(--out)}
   .info{flex:1;min-width:0;text-align:left}
+  .inforow{display:flex;align-items:center;gap:10px}
+  .infotext{flex:1;min-width:0}
+  .thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#F2F1EB}
+  .thumb-ph{display:flex;align-items:center;justify-content:center;font-size:18px}
   .info .name{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .info .name.done{text-decoration:line-through;color:var(--sub)}
   .meta{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:11px}
@@ -107,6 +111,10 @@
   .primary:disabled{background:#C9CFC9}
   .photobtn{width:100%;background:#EEF3F3;color:var(--accent);font-weight:700;font-size:13px;border-radius:12px;padding:11px 0;margin:-6px 0 16px;border:1px dashed var(--accent)}
   .photobtn:disabled{opacity:.6}
+  .photopreview-wrap{position:relative;width:96px;margin-bottom:14px}
+  .photopreview{width:96px;height:96px;object-fit:cover;border-radius:14px;display:block;border:1px solid var(--line)}
+  .photopreview-x{position:absolute;top:-7px;right:-7px;background:var(--ink);color:#FFF;width:22px;height:22px;
+                  border-radius:50%;font-size:13px;line-height:22px;text-align:center;padding:0}
   .danger{width:100%;color:var(--out);font-weight:600;font-size:13px;padding:10px 0;margin-top:6px}
 
   .gate{padding:60px 28px;text-align:center}
@@ -263,6 +271,7 @@ async function saveItem(data, id){
     name:data.name.trim(), category:data.category, unit:data.unit,
     qty:Math.max(0, Number(data.qty)||0),
     threshold:Math.max(0, Number(data.threshold)||0),
+    photo: data.photo ?? null,
     updatedAt:serverTimestamp()
   };
   if(id){
@@ -377,14 +386,21 @@ function advise(item){
   ]};
 }
 
-// ---------- photo counting (Gemini vision) ----------
-async function shrinkImage(file, max=1024){
+// ---------- photo helpers ----------
+async function shrinkImageDataURL(file, max=1024, quality=0.8){
   const img = await createImageBitmap(file);
   const scale = Math.min(1, max / Math.max(img.width, img.height));
   const c = document.createElement("canvas");
   c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL("image/jpeg", 0.8).split(",")[1];
+  return c.toDataURL("image/jpeg", quality);
+}
+async function shrinkImage(file, max=1024){
+  return (await shrinkImageDataURL(file, max, 0.8)).split(",")[1];
+}
+// Small square version kept as each item's display photo, stored inline on the Firestore doc.
+async function thumbnailDataURL(file){
+  return shrinkImageDataURL(file, 480, 0.72);
 }
 async function countFromPhoto(file, name, unit){
   if(!aiModel) throw new Error("AI not ready — enable AI Logic in Firebase");
@@ -483,12 +499,21 @@ function render(){
   updateOffline();
 }
 
+function thumbHTML(i){
+  const cat = catOf(i.category);
+  return i.photo
+    ? `<img src="${i.photo}" class="thumb" alt="">`
+    : `<div class="thumb thumb-ph">${cat.icon}</div>`;
+}
 function cardHTML(i){
   const st = statusOf(i), cat = catOf(i.category);
   return `<div class="card ${st}">
-    <button class="info" data-edit="${i.id}">
-      <div class="name">${esc(i.name)}</div>
-      <div class="meta"><span class="badge ${st}">${stLabel[st]}</span><span class="cat">${cat.icon} ${cat.label}</span></div>
+    <button class="info inforow" data-edit="${i.id}">
+      ${thumbHTML(i)}
+      <div class="infotext">
+        <div class="name">${esc(i.name)}</div>
+        <div class="meta"><span class="badge ${st}">${stLabel[st]}</span><span class="cat">${cat.icon} ${cat.label}</span></div>
+      </div>
     </button>
     <div class="stepper">
       <button data-dec="${i.id}" ${i.qty<=0?"disabled":""}>−</button>
@@ -536,7 +561,9 @@ function bind(){
 // ---------- modal ----------
 function openModal(item){
   const editing = !!item;
-  const f = editing ? {...item} : { name:"", category:"kitchen", unit:"pcs", qty:1, threshold:1 };
+  const f = editing ? {...item} : { name:"", category:"kitchen", unit:"pcs", qty:1, threshold:1, photo:null };
+  const aiReady = PHOTO_COUNTING_ENABLED && !!aiModel;
+  const photoLabel = aiReady ? "📷 Take photo (auto-counts qty)" : "📷 Take / choose photo";
   const ov = document.createElement("div");
   ov.className = "overlay";
   ov.innerHTML = `<div class="sheet">
@@ -552,8 +579,10 @@ function openModal(item){
       <div><label>Unit</label><select class="field" id="fUnit">${UNITS.map(u=>`<option ${f.unit===u?"selected":""}>${u}</option>`).join("")}</select></div>
       <div><label>Low at</label><input class="field" id="fThr" type="number" min="0" value="${f.threshold}"></div>
     </div>
-    ${PHOTO_COUNTING_ENABLED ? `<button class="photobtn" id="fPhoto">📷 Count from photo</button>
-    <input type="file" id="fPhotoIn" accept="image/*" capture="environment" style="display:none">` : ""}
+    <label>Photo</label>
+    <div id="photoPreviewWrap"></div>
+    <button class="photobtn" id="fPhoto">${photoLabel}</button>
+    <input type="file" id="fPhotoIn" accept="image/*" capture="environment" style="display:none">
     <div class="note">"Low at" is the level where this item joins your shopping list.</div>
     <button class="primary" id="fSave">${editing?"Save changes":"Add to stock"}</button>
     ${editing?`<button class="danger" id="fDel">Delete item</button>`:""}
@@ -564,16 +593,34 @@ function openModal(item){
   ov.querySelector(".x").onclick = close;
   ov.querySelectorAll("[data-c]").forEach(b=> b.onclick=()=>{ f.category=b.dataset.c;
     ov.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on", x.dataset.c===f.category)); });
+
+  const previewWrap = ov.querySelector("#photoPreviewWrap");
+  function renderPreview(){
+    previewWrap.innerHTML = f.photo
+      ? `<div class="photopreview-wrap"><img src="${f.photo}" class="photopreview"><button type="button" class="photopreview-x" id="fPhotoRemove">×</button></div>`
+      : "";
+    const rm = previewWrap.querySelector("#fPhotoRemove");
+    if(rm) rm.onclick = ()=>{ f.photo = null; renderPreview(); };
+  }
+  renderPreview();
+
   const photoBtn = ov.querySelector("#fPhoto");
-  if(photoBtn){
-    const fileIn = ov.querySelector("#fPhotoIn");
-    photoBtn.onclick = ()=>{
+  const fileIn = ov.querySelector("#fPhotoIn");
+  photoBtn.onclick = ()=>{
+    if(aiReady){
       const nm = ov.querySelector("#fName").value.trim();
       if(!nm){ toast("Type the item name first, so I know what to count"); return; }
-      fileIn.click();
-    };
-    fileIn.onchange = async ()=>{
-      const file = fileIn.files[0]; if(!file) return;
+    }
+    fileIn.click();
+  };
+  fileIn.onchange = async ()=>{
+    const file = fileIn.files[0]; if(!file) return;
+    try {
+      f.photo = await thumbnailDataURL(file);
+      renderPreview();
+    } catch(e){ console.error(e); }
+
+    if(aiReady){
       const nm = ov.querySelector("#fName").value.trim();
       const un = ov.querySelector("#fUnit").value;
       photoBtn.disabled = true; photoBtn.textContent = "🔎 Counting…";
@@ -585,11 +632,13 @@ function openModal(item){
         console.error(e);
         toast("Photo count failed: " + (e.message || "unknown error"));
       } finally {
-        photoBtn.disabled = false; photoBtn.textContent = "📷 Count from photo";
+        photoBtn.disabled = false; photoBtn.textContent = photoLabel;
         fileIn.value = "";
       }
-    };
-  }
+    } else {
+      fileIn.value = "";
+    }
+  };
   ov.querySelector("#fSave").onclick = async ()=>{
     f.name = ov.querySelector("#fName").value;
     if(!f.name.trim()) return;
