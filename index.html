@@ -149,6 +149,44 @@
   .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:#FFF;
          font-size:12px;border-radius:10px;padding:9px 16px;z-index:60;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.show{opacity:1}
+
+  /* Tablet / large screens (e.g. 13" iPad): wider container, two-column list, bigger type */
+  @media (min-width:700px){
+    body{max-width:1000px;padding-bottom:130px}
+    header{padding:36px 32px 16px}
+    h1{font-size:32px}
+    .brand{font-size:13px}
+    .count b{font-size:32px}
+    .count span,.house,.house button{font-size:13px}
+    .tabs{margin:0 32px}
+    .tabs button{padding:12px 0;font-size:15px}
+    .search{margin:20px 32px 0}
+    .search input{padding:14px 18px;font-size:17px}
+    .chips{padding:14px 32px 6px}
+    .chip{padding:9px 18px;font-size:14px}
+    .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px;padding:16px 32px 0;align-items:start}
+    .card{padding:16px 18px}
+    .thumb{width:56px;height:56px;border-radius:12px}
+    .thumb-ph{font-size:26px}
+    .info .name{font-size:17px}
+    .meta{font-size:13px;margin-top:6px}
+    .stepper button{width:44px;font-size:24px}
+    .qty{width:64px}
+    .qty b{font-size:22px}
+    .qty span{font-size:12px}
+    .restock,.advice{font-size:14px;padding:11px 14px}
+    .del{font-size:18px}
+    .hint{font-size:13px;padding:16px 32px 0}
+    .empty{font-size:16px}
+    .fab{width:64px;height:64px;font-size:34px;right:max(24px,calc(50% - 476px))}
+    .overlay{align-items:center;padding:24px}
+    .sheet{max-width:560px;border-radius:24px}
+    .sheet h2{font-size:20px}
+    label{font-size:13px}
+    .primary{font-size:16px;padding:15px 0}
+    .photobtn{font-size:15px;padding:13px 0}
+    .toast{font-size:14px;bottom:120px}
+  }
   .offline{background:var(--low-bg);color:var(--low);font-size:11px;border-radius:10px;padding:8px 12px;margin:10px 20px 0;display:none}
 </style>
 </head>
