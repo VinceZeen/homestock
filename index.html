@@ -589,7 +589,7 @@ function render(){
     </header>
     <div class="tabs">
       <button class="${view==="stock"?"on":""}" data-view="stock">Stock</button>
-      <button class="${view==="shopping"?"on":""}" data-view="shopping">Shopping list${low.length?` (${low.length})`:""}</button>
+      <button class="${view==="shopping"?"on":""}" data-view="shopping">Stock running low${low.length?` (${low.length})`:""}</button>
     </div>
     ${view==="stock" ? `
       <div class="search"><input id="searchIn" placeholder="Search items" value="${esc(search)}"></div>
@@ -762,7 +762,7 @@ function openModal(item){
     <div id="photoPreviewWrap"></div>
     <button class="photobtn" id="fPhoto">${photoLabel}</button>
     <input type="file" id="fPhotoIn" accept="image/*" capture="environment" style="display:none">
-    <div class="note">"Low at" is the level where this item joins your shopping list.</div>
+    <div class="note">"Low at" is the level where this item joins your "Stock running low" list.</div>
     <button class="primary" id="fSave">${editing?"Save changes":"Add to stock"}</button>
     ${editing?`<button class="danger" id="fDel">Delete item</button>`:""}
   </div>`;
