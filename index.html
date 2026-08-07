@@ -77,6 +77,12 @@
   .qty span{color:var(--sub);font-size:10px}
   .qty.ok b{color:var(--ok)} .qty.low b{color:var(--low)} .qty.out b{color:var(--out)}
 
+  .daysbox{text-align:center;flex-shrink:0;min-width:58px}
+  .daysbox b{font-family:var(--mono);font-size:22px;display:block;line-height:1.1}
+  .daysbox span{color:var(--sub);font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  .daysbox.none b{color:#C6C4BA}
+  .uselog{font-family:var(--mono);font-size:10px;color:var(--sub);margin-top:5px}
+
   .restock{background:var(--ok-bg);color:var(--ok);font-size:12px;font-weight:700;border-radius:10px;padding:9px 12px}
   .advice{background:#EEF3F3;color:var(--accent);font-size:12px;font-weight:700;border-radius:10px;padding:9px 10px;white-space:nowrap}
   .verdict{font-size:15px;font-weight:800;border-radius:12px;padding:12px 16px;margin-bottom:12px}
@@ -165,6 +171,42 @@
          font-size:12px;border-radius:10px;padding:9px 16px;z-index:60;opacity:0;transition:opacity .3s;pointer-events:none}
   .toast.show{opacity:1}
   .offline{background:var(--low-bg);color:var(--low);font-size:11px;border-radius:10px;padding:8px 12px;margin:10px 20px 0;display:none}
+
+  /* Big screens (13" iPad, desktop): wider grid layout, larger type and touch targets */
+  @media (min-width: 768px){
+    body{max-width:1040px;padding-bottom:130px}
+    header{padding:36px 32px 16px}
+    .brand{font-size:13px}
+    h1{font-size:34px}
+    .count b{font-size:32px}
+    .count span{font-size:13px}
+    .house{font-size:13px} .house button{font-size:13px}
+    .tabs{margin:0 32px}
+    .tabs button{padding:12px 0;font-size:15px}
+    .search{margin:18px 32px 0}
+    .search input{padding:13px 18px;font-size:17px}
+    .chips{padding:14px 32px 4px}
+    .chip{font-size:14px;padding:9px 18px}
+    .hint{padding:16px 32px 0;font-size:13px}
+    .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px;padding:16px 32px 0;align-items:start}
+    .card{padding:14px 18px}
+    .thumb{width:56px;height:56px;font-size:24px}
+    .info .name{font-size:16px}
+    .meta{font-size:12px}
+    .uselog{font-size:11px}
+    .daysbox b{font-size:26px}
+    .daysbox span{font-size:10px}
+    .stepper button{width:44px}
+    .qty{width:64px} .qty b{font-size:22px}
+    .empty{font-size:16px}
+    .fab{width:68px;height:68px;font-size:38px;right:max(28px,calc(50% - 488px))}
+    .fab-ai{bottom:108px;font-size:28px}
+    .overlay{align-items:center;padding:24px}
+    .sheet{max-width:640px;border-radius:24px}
+    .chatwrap{height:64vh}
+    .msg{font-size:15px}
+    .gate{max-width:560px;margin:0 auto}
+  }
 </style>
 </head>
 <body>
@@ -255,6 +297,10 @@ const $ = (s)=>document.querySelector(s);
 const app = $("#app");
 const esc = (s)=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const statusOf = (i)=> i.qty<=0 ? "out" : i.qty<=i.threshold ? "low" : "ok";
+const DAY = 86400000;
+const daysSince = (ts)=> Math.floor((Date.now()-ts)/DAY);
+const fmtDate = (ts)=> new Date(ts).toLocaleDateString(undefined,{ day:"numeric", month:"short" });
+const agoTxt = (ts)=>{ const d = daysSince(ts); return d<=0 ? "today" : d===1 ? "yesterday" : `${d}d ago`; };
 const stLabel = { ok:"In stock", low:"Running low", out:"Out" };
 const catOf = (id)=> CATEGORIES.find(c=>c.id===id) || CATEGORIES[5];
 const toast = (msg)=>{ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); };
@@ -306,6 +352,15 @@ function connect(){
   render();
 }
 const pendingAdds = new Set();
+// Any drop in quantity counts as the item being "used": stamp the date and keep a
+// short usage log on the doc. Client time, not serverTimestamp — Firestore doesn't
+// allow serverTimestamp inside arrays, and day-level precision is all we need.
+function usagePatch(prev, newQty){
+  const used = (Number(prev.qty)||0) - newQty;
+  if(used <= 0) return {};
+  const at = Date.now();
+  return { lastUsedAt: at, usageLog: [{ at, used }, ...(prev.usageLog||[])].slice(0,12) };
+}
 async function saveItem(data, id){
   const payload = {
     name:data.name.trim(), category:data.category, unit:data.unit,
@@ -317,6 +372,7 @@ async function saveItem(data, id){
   if(id){
     const prev = items.find(i=>i.id===id) || {};
     payload.fullQty = Math.max(prev.fullQty||1, payload.qty);
+    Object.assign(payload, usagePatch(prev, payload.qty));
     // block renaming into an existing item's name
     const clash = items.find(i=> i.id!==id && i.name.trim().toLowerCase()===payload.name.toLowerCase());
     if(clash){ toast(`"${payload.name}" already exists`); return; }
@@ -341,10 +397,11 @@ async function saveItem(data, id){
 }
 async function changeQty(id, delta){
   const it = items.find(i=>i.id===id); if(!it) return;
+  const qty = Math.max(0, it.qty+delta);
   await updateDoc(doc(itemsCol(), id), {
-    qty: Math.max(0, it.qty+delta),
-    fullQty: Math.max(it.fullQty||1, it.qty+delta),
-    bought:false, updatedAt:serverTimestamp()
+    qty, fullQty: Math.max(it.fullQty||1, qty),
+    bought:false, updatedAt:serverTimestamp(),
+    ...usagePatch(it, qty)
   });
 }
 async function restock(id){
@@ -438,6 +495,7 @@ Rules:
 - Only call remove_item when the user clearly asked to delete; otherwise confirm first.
 - For "where should I buy X" use purchase_advice and summarize the verdict and reason in 1-2 sentences. Mention they can tap "💡 Where?" on the shopping list for direct store links.
 - Item names in tool calls can be approximate — the app matches them loosely — but prefer the exact names from get_inventory.
+- Every quantity reduction is logged automatically as "usage". get_inventory shows each item's days since last use and recent usage entries — use them for questions like "when did we last use X" or "what haven't we touched lately".
 - Keep replies short, warm and phone-friendly: plain text, short lines, the item's own unit. No markdown tables or headings.`;
 
 const agentTools = [{ functionDeclarations: [
@@ -501,7 +559,9 @@ async function runAgentTool(name, args){
     case "get_inventory":
       return { house: houseCode, items: items.map(i=>({
         name:i.name, qty:i.qty, unit:i.unit, lowAt:i.threshold,
-        status:statusOf(i), category:i.category, boughtTick: !!i.bought
+        status:statusOf(i), category:i.category, boughtTick: !!i.bought,
+        daysSinceLastUse: i.lastUsedAt ? daysSince(i.lastUsedAt) : null,
+        recentUsage: (i.usageLog||[]).slice(0,5).map(e=>({ date:new Date(e.at).toISOString().slice(0,10), used:e.used }))
       })) };
     case "add_item": {
       if(findByName(args.name)) return { error:`"${args.name}" is already in the list — use set_quantity instead` };
@@ -517,7 +577,8 @@ async function runAgentTool(name, args){
       const it = need();
       const qty = Math.max(0, Math.round(Number(args.qty)||0));
       await updateDoc(doc(itemsCol(), it.id), {
-        qty, fullQty: Math.max(it.fullQty||1, qty), bought:false, updatedAt:serverTimestamp()
+        qty, fullQty: Math.max(it.fullQty||1, qty), bought:false, updatedAt:serverTimestamp(),
+        ...usagePatch(it, qty)
       });
       return { ok:true, name:it.name, qty, unit:it.unit, status: qty<=0?"out":qty<=it.threshold?"low":"ok" };
     }
@@ -742,13 +803,20 @@ function render(){
     } else {
       listHTML = `<div class="list">${vis.map(cardHTML).join("")}</div>`;
     }
-  } else {
+  } else if(view==="shopping"){
     const sorted = [...low].sort((a,b)=>rank[statusOf(a)]-rank[statusOf(b)]);
     listHTML = low.length===0
       ? `<div class="empty"><div class="big">✅</div><b>Nothing to buy</b>
          Everything is above its low-stock level. Items appear here automatically when they run low.</div>`
       : `<div class="hint">Tick items as you buy them, then tap Restocked to update your stock.</div>
          <div class="list">${sorted.map(shopHTML).join("")}</div>`;
+  } else {
+    const sorted = [...items].sort((a,b)=> (b.lastUsedAt||0)-(a.lastUsedAt||0) || a.name.localeCompare(b.name));
+    listHTML = items.length===0
+      ? `<div class="empty"><div class="big">⏱</div><b>No usage to show</b>
+         Add items on the Stock tab first — usage is recorded automatically whenever a quantity goes down.</div>`
+      : `<div class="hint">Every time a quantity goes down it's recorded here — most recently used first.</div>
+         <div class="list">${sorted.map(usageHTML).join("")}</div>`;
   }
 
   app.innerHTML = `
@@ -765,7 +833,8 @@ function render(){
     </header>
     <div class="tabs">
       <button class="${view==="stock"?"on":""}" data-view="stock">Stock</button>
-      <button class="${view==="shopping"?"on":""}" data-view="shopping">Shopping list${low.length?` (${low.length})`:""}</button>
+      <button class="${view==="shopping"?"on":""}" data-view="shopping">Shopping${low.length?` (${low.length})`:""}</button>
+      <button class="${view==="usage"?"on":""}" data-view="usage">Usage</button>
     </div>
     ${view==="stock" ? `
       <div class="search"><input id="searchIn" placeholder="Search items" value="${esc(search)}"></div>
@@ -862,7 +931,7 @@ function cardHTML(i){
       ${thumbHTML(i)}
       <div class="infotext">
         <div class="name">${esc(i.name)}</div>
-        <div class="meta"><span class="badge ${st}">${stLabel[st]}</span><span class="cat">${cat.icon} ${cat.label}</span></div>
+        <div class="meta"><span class="badge ${st}">${stLabel[st]}</span><span class="cat">${cat.icon} ${cat.label}</span>${i.lastUsedAt?`<span class="cat">⏱ used ${agoTxt(i.lastUsedAt)}</span>`:""}</div>
       </div>
     </button>
     <div class="stepper">
@@ -871,6 +940,29 @@ function cardHTML(i){
       <button data-inc="${i.id}">+</button>
     </div>
     <button class="del" data-del="${i.id}" aria-label="Delete ${esc(i.name)}">🗑</button>
+  </div>`;
+}
+function usageHTML(i){
+  const st = statusOf(i);
+  const last = (i.usageLog||[])[0];
+  const days = i.lastUsedAt ? daysSince(i.lastUsedAt) : null;
+  const hist = (i.usageLog||[]).slice(0,3).map(e=>`−${e.used} on ${fmtDate(e.at)}`).join(" · ");
+  return `<div class="card ${st}">
+    ${thumbHTML(i)}
+    <div class="info">
+      <div class="name">${esc(i.name)}</div>
+      <div class="meta">
+        ${ days===null
+          ? `<span class="cat">No use recorded yet</span>`
+          : `<span class="cat">Last used ${fmtDate(i.lastUsedAt)}${last?` · ${last.used} ${esc(i.unit)} used`:""}</span>` }
+        <span class="badge ${st}">${i.qty} ${esc(i.unit)} left</span>
+      </div>
+      ${hist?`<div class="uselog">${hist}</div>`:""}
+    </div>
+    <div class="daysbox${days===null?" none":""}">
+      <b>${days===null?"—":days}</b>
+      <span>${days===null?"no data":days===1?"day since use":"days since use"}</span>
+    </div>
   </div>`;
 }
 function shopHTML(i){
