@@ -81,7 +81,9 @@
   .daysbox b{font-family:var(--mono);font-size:22px;display:block;line-height:1.1}
   .daysbox span{color:var(--sub);font-size:9px;text-transform:uppercase;letter-spacing:.04em}
   .daysbox.none b{color:#C6C4BA}
-  .uselog{font-family:var(--mono);font-size:10px;color:var(--sub);margin-top:5px}
+  .uselog{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .uselog button{font-family:var(--mono);font-size:10px;color:var(--sub);background:#F2F1EB;border-radius:6px;padding:2px 7px}
+  .uselog button:active{background:var(--out-bg);color:var(--out)}
 
   .restock{background:var(--ok-bg);color:var(--ok);font-size:12px;font-weight:700;border-radius:10px;padding:9px 12px}
   .advice{background:#EEF3F3;color:var(--accent);font-size:12px;font-weight:700;border-radius:10px;padding:9px 10px;white-space:nowrap}
@@ -208,7 +210,7 @@
     .photobtn{font-size:15px;padding:13px 0}
     .toast{font-size:14px;bottom:120px}
     .fab-ai{bottom:100px;font-size:28px}
-    .uselog{font-size:11px}
+    .uselog button{font-size:11px}
     .daysbox b{font-size:26px}
     .daysbox span{font-size:10px}
     .chatwrap{height:64vh}
@@ -422,6 +424,16 @@ async function restock(id){
 }
 async function toggleBought(id, v){ await updateDoc(doc(itemsCol(), id), { bought:v }); }
 async function removeItem(id){ await deleteDoc(doc(itemsCol(), id)); }
+// Usage-history deletion: stock quantity is untouched; lastUsedAt follows the newest remaining entry.
+async function deleteUsageEntry(id, at){
+  const it = items.find(i=>i.id===id); if(!it) return;
+  const log = (it.usageLog||[]).filter(e=>e.at!==at);
+  await updateDoc(doc(itemsCol(), id), { usageLog: log, lastUsedAt: log[0]?.at ?? null, updatedAt:serverTimestamp() });
+}
+async function clearUsage(id){
+  const it = items.find(i=>i.id===id); if(!it) return;
+  await updateDoc(doc(itemsCol(), id), { usageLog: [], lastUsedAt: null, updatedAt:serverTimestamp() });
+}
 
 // ---------- purchase advisor ----------
 const ZH_DICT = [
@@ -537,6 +549,9 @@ const agentTools = [{ functionDeclarations: [
   { name:"remove_item",
     description:"Delete an item from the stock list entirely. Only after the user clearly asked for deletion.",
     parameters: Schema.object({ properties:{ name: Schema.string({ description:"Name of an existing item" }) } }) },
+  { name:"clear_usage_history",
+    description:"Delete an item's recorded usage history (last-used date and usage log). Stock quantity is not affected. Only when the user clearly asks to delete usage records.",
+    parameters: Schema.object({ properties:{ name: Schema.string({ description:"Name of an existing item" }) } }) },
   { name:"purchase_advice",
     description:"Get Singapore buying advice for an item: whether to buy locally (FairPrice / Shopee SG) or bulk-order from China (Taobao / Pinduoduo), with reasoning based on stock level and item type.",
     parameters: Schema.object({ properties:{ name: Schema.string({ description:"Name of an existing item" }) } }) },
@@ -605,6 +620,11 @@ async function runAgentTool(name, args){
       const it = need();
       await removeItem(it.id);
       return { ok:true, removed:it.name };
+    }
+    case "clear_usage_history": {
+      const it = need();
+      await clearUsage(it.id);
+      return { ok:true, name:it.name, usageHistory:"cleared" };
     }
     case "purchase_advice": {
       const it = need();
@@ -955,7 +975,8 @@ function usageHTML(i){
   const st = statusOf(i);
   const last = (i.usageLog||[])[0];
   const days = i.lastUsedAt ? daysSince(i.lastUsedAt) : null;
-  const hist = (i.usageLog||[]).slice(0,3).map(e=>`−${e.used} on ${fmtDate(e.at)}`).join(" · ");
+  const hist = (i.usageLog||[]).slice(0,3).map(e=>
+    `<button data-uldel="${i.id}" data-at="${e.at}" aria-label="Delete this usage record">−${e.used} on ${fmtDate(e.at)} ×</button>`).join("");
   return `<div class="card ${st}">
     ${thumbHTML(i)}
     <div class="info">
@@ -972,6 +993,7 @@ function usageHTML(i){
       <b>${days===null?"—":days}</b>
       <span>${days===null?"no data":days===1?"day since use":"days since use"}</span>
     </div>
+    ${days!==null?`<button class="del" data-ulclear="${i.id}" aria-label="Clear usage history for ${esc(i.name)}">🗑</button>`:""}
   </div>`;
 }
 function shopHTML(i){
@@ -1010,6 +1032,17 @@ function bind(){
   document.querySelectorAll("[data-del]").forEach(b=> b.onclick=async ()=>{
     const it = items.find(i=>i.id===b.dataset.del); if(!it) return;
     if(confirm(`Delete "${it.name}" from your stock?`)){ await removeItem(it.id); toast(`${it.name} deleted`); }
+  });
+  document.querySelectorAll("[data-uldel]").forEach(b=> b.onclick=async ()=>{
+    const it = items.find(i=>i.id===b.dataset.uldel); if(!it) return;
+    if(confirm(`Delete this usage record for "${it.name}"? Stock quantity is not affected.`))
+      await deleteUsageEntry(it.id, Number(b.dataset.at));
+  });
+  document.querySelectorAll("[data-ulclear]").forEach(b=> b.onclick=async ()=>{
+    const it = items.find(i=>i.id===b.dataset.ulclear); if(!it) return;
+    if(confirm(`Clear the whole usage history for "${it.name}"? Stock quantity is not affected.`)){
+      await clearUsage(it.id); toast(`${it.name} usage history cleared`);
+    }
   });
   document.querySelectorAll("[data-buy]").forEach(b=> b.onchange=()=>toggleBought(b.dataset.buy, b.checked));
   document.querySelectorAll("[data-quick]").forEach(b=> b.onclick=()=>saveItem(QUICK[Number(b.dataset.quick)]));
