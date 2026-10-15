@@ -86,6 +86,10 @@
   .uselog button:active{background:var(--out-bg);color:var(--out)}
 
   .restock{background:var(--ok-bg);color:var(--ok);font-size:12px;font-weight:700;border-radius:10px;padding:9px 12px}
+  .shopcard{flex-direction:column;align-items:stretch;gap:10px}
+  .shoptop{display:flex;align-items:center;gap:12px;min-width:0}
+  .shoptop .info{min-width:0}
+  .shopbtns{display:flex;gap:10px;justify-content:flex-end}
   .advice{background:#EEF3F3;color:var(--accent);font-size:12px;font-weight:700;border-radius:10px;padding:9px 10px;white-space:nowrap}
   .verdict{font-size:15px;font-weight:800;border-radius:12px;padding:12px 16px;margin-bottom:12px}
   .verdict.ok{background:var(--ok-bg);color:var(--ok)} .verdict.low{background:var(--low-bg);color:var(--low)} .verdict.out{background:var(--out-bg);color:var(--out)}
@@ -198,6 +202,9 @@
     .qty b{font-size:22px}
     .qty span{font-size:12px}
     .restock,.advice{font-size:14px;padding:11px 14px}
+    .shopcard{flex-direction:row;align-items:center}
+    .shopcard .shoptop{flex:1}
+    .shopbtns{flex-shrink:0}
     .del{font-size:18px}
     .hint{font-size:13px;padding:16px 32px 0}
     .empty{font-size:16px}
@@ -998,14 +1005,19 @@ function usageHTML(i){
 }
 function shopHTML(i){
   const st = statusOf(i);
-  return `<div class="card">
-    <input type="checkbox" data-buy="${i.id}" ${i.bought?"checked":""}>
-    <div class="info">
-      <div class="name ${i.bought?"done":""}">${esc(i.name)}</div>
-      <div class="meta"><span class="badge ${st}">${stLabel[st]} · ${i.qty} ${esc(i.unit)} left</span></div>
+  return `<div class="card shopcard">
+    <div class="shoptop">
+      <input type="checkbox" data-buy="${i.id}" ${i.bought?"checked":""}>
+      ${thumbHTML(i)}
+      <div class="info">
+        <div class="name ${i.bought?"done":""}">${esc(i.name)}</div>
+        <div class="meta"><span class="badge ${st}">${stLabel[st]} · ${i.qty} ${esc(i.unit)} left</span></div>
+      </div>
     </div>
-    <button class="advice" data-advice="${i.id}">💡 Where?</button>
-    <button class="restock" data-restock="${i.id}">Restocked</button>
+    <div class="shopbtns">
+      <button class="advice" data-advice="${i.id}">💡 Where?</button>
+      <button class="restock" data-restock="${i.id}">Restocked</button>
+    </div>
   </div>`;
 }
 
